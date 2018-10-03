@@ -76,16 +76,14 @@ func sync(sess *sf.Session, db *database) ([]Note, error) {
 
 func main() {
 	listNotes := flag.Bool("list", false, "Retrieve a list of notes")
+	syncAndExit := flag.Bool("sync", false, "Sync database and exit")
+
 	email := flag.String("email", "", "email")
 	password := flag.String("password", "", "password")
 	if *email == "" || *password == "" {
 		fmt.Println("No login information use -email and -password")
 		return
 	}
-	// TODO:
-	// TrackUUID
-	// TrackAll
-	// SyncAndExit
 
 	flag.Parse()
 
@@ -122,12 +120,18 @@ func main() {
 		log.Println("Database is up to date")
 	}
 
-	if *listNotes {
-		items, err := db.getItems()
-		if err != nil {
-			log.Fatal(err)
-		}
+	if *syncAndExit {
+		return
+	}
 
+	// Get a list of items from the database
+	items, err := db.getItems()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// List notes
+	if *listNotes {
 		for _, item := range items {
 			note, err := itemToNote(sess, &item)
 			if err != nil {
@@ -135,5 +139,26 @@ func main() {
 			}
 			fmt.Println(note.UUID + " - " + note.Title)
 		}
+
+		return // Exit
+	}
+
+	err = createDir("notes")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create txt files from notes
+	for _, item := range items {
+		note, err := itemToNote(sess, &item)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = note.createFile()
+		if err != nil {
+			log.Fatal(err)
+		}
+
 	}
 }
