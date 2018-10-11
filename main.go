@@ -22,7 +22,9 @@ type Reference struct {
 	ContentType string `json:"content_type"`
 }
 
-// Decrypt and unmarshl an item
+var files map[string]string // Map filename to UUID
+
+// Decrypt and unmarshal an item
 func itemToNote(sess *sf.Session, item *sf.Item) (Note, error) {
 	pt, err := sess.Decrypt(item)
 	if err != nil {
@@ -80,12 +82,15 @@ func main() {
 
 	email := flag.String("email", "", "email")
 	password := flag.String("password", "", "password")
+
+	flag.Parse()
+
 	if *email == "" || *password == "" {
 		fmt.Println("No login information use -email and -password")
 		return
 	}
 
-	flag.Parse()
+	files = make(map[string]string)
 
 	db, err := InitDB()
 	if err != nil {
@@ -155,10 +160,10 @@ func main() {
 			log.Fatal(err)
 		}
 
-		err = note.createFile()
+		filename, err := note.createFile()
 		if err != nil {
 			log.Fatal(err)
 		}
-
+		files[filename] = note.UUID
 	}
 }
