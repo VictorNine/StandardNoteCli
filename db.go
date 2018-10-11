@@ -87,3 +87,13 @@ func (db *database) getItems() ([]sf.Item, error) {
 
 	return items, err
 }
+
+func (db *database) deleteItem(uuid string) error {
+	err := db.conn.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("Notes"))
+		err := b.Delete([]byte(uuid))
+		return err
+	})
+
+	return err
+}

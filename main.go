@@ -55,6 +55,15 @@ func sync(sess *sf.Session, db *database) ([]Note, error) {
 			continue
 		}
 
+		// Delete the item from DB if marked for deletion
+		if item.Deleted {
+			err := db.deleteItem(item.UUID)
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+
 		db.saveItem(&item)
 
 		newNotes[i], err = itemToNote(sess, &item)
