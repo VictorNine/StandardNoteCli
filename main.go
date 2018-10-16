@@ -5,8 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	sf "github.com/VictorNine/sfgo"
+	"github.com/fsnotify/fsnotify"
 )
 
 type Note struct {
@@ -23,6 +26,51 @@ type Reference struct {
 }
 
 var files map[string]string // Map filename to UUID
+
+func syncLoop(sess *sf.Session, db *database) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer watcher.Close()
+
+	syncTimer := time.NewTicker(30 * time.Second)
+	defer syncTimer.Stop()
+
+	err = watcher.Add("notes")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			log.Println("event:", event)
+			if event.Op&fsnotify.Write == fsnotify.Write {
+				filename := "./" + strings.Replace(event.Name, "\\", "/", -1)
+				uuid, ok := files[filename]
+				if ok {
+					fileToNote(uuid, filename, sess, db)
+				}
+				log.Println("modified file:", event.Name)
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			log.Println("error:", err)
+
+		case <-syncTimer.C:
+			err := sync(sess, db)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+	}
+}
 
 // Decrypt and unmarshal an item
 func itemToNote(sess *sf.Session, item *sf.Item) (Note, error) {
@@ -42,34 +90,63 @@ func itemToNote(sess *sf.Session, item *sf.Item) (Note, error) {
 	return note, nil
 }
 
-func sync(sess *sf.Session, db *database) ([]Note, error) {
-	items, err := sess.Sync()
+func sync(sess *sf.Session, db *database) error {
+	unItems, err := db.getUnsyncedItems()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	newNotes := make([]Note, len(items.RetrievedItems))
+	for _, it := range unItems {
+		log.Println(it.UUID + " ready to be synced")
+		err := sess.UpdateItem(it)
+		if err != nil {
+			return err
+		}
+	}
 
-	for i, item := range items.RetrievedItems {
+	// Sync
+	items, err := sess.Sync()
+	if err != nil {
+		return err
+	}
+
+	// TODO: Check if there were conflicts before deleting (implement in lib)
+	for _, it := range unItems {
+		err := db.deletetUnsyncedItem(it.UUID)
+		if err != nil {
+			return err
+		}
+	}
+
+	notesSynced := 0 // Counter for notes synced
+	for _, item := range items.RetrievedItems {
 		if item.ContentType != "Note" {
 			continue
 		}
+
+		notesSynced++
 
 		// Delete the item from DB if marked for deletion
 		if item.Deleted {
 			err := db.deleteItem(item.UUID)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			continue
 		}
 
 		db.saveItem(&item)
 
-		newNotes[i], err = itemToNote(sess, &item)
+		_, err := createFile(&item, sess)
 		if err != nil {
-			return nil, err
+			log.Fatal(err)
 		}
+	}
+
+	if notesSynced > 0 {
+		log.Printf("%v new notes synced to database\n", notesSynced)
+	} else {
+		log.Println("Database is up to date")
 	}
 
 	for _, item := range items.SavedItems {
@@ -82,7 +159,7 @@ func sync(sess *sf.Session, db *database) ([]Note, error) {
 
 	db.setSyncToken(*sess.SyncToken)
 
-	return newNotes, nil
+	return nil
 }
 
 func main() {
@@ -91,7 +168,6 @@ func main() {
 
 	email := flag.String("email", "", "email")
 	password := flag.String("password", "", "password")
-
 	flag.Parse()
 
 	if *email == "" || *password == "" {
@@ -124,14 +200,9 @@ func main() {
 
 	log.Println("Login successful!")
 
-	newNotes, err := sync(sess, db)
+	err = sync(sess, db)
 	if err != nil {
 		log.Fatal(err)
-	}
-	if len(newNotes) > 0 {
-		log.Printf("%v new notes synced to database\n", len(newNotes))
-	} else {
-		log.Println("Database is up to date")
 	}
 
 	if *syncAndExit {
@@ -164,15 +235,12 @@ func main() {
 
 	// Create txt files from notes
 	for _, item := range items {
-		note, err := itemToNote(sess, &item)
+		_, err := createFile(&item, sess)
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		filename, err := note.createFile()
-		if err != nil {
-			log.Fatal(err)
-		}
-		files[filename] = note.UUID
 	}
+
+	// Start sync loop
+	syncLoop(sess, db)
 }
