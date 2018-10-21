@@ -1,9 +1,15 @@
 # StandardNoteCli
-A command line interface for StandardNote
+A command line interface for [StandardNote](https://standardnotes.org/)
 
-Right now it only keeps a local bolt database synced with a StandardFile server. This is usefull for backup solutions like Rustic.
+(Work in progress. Use at your own risk)
 
-More functionality is planned
+Can be used to:
+1. Sync your notes with text files in a local directory
+2. Keep a bolt database synced with a standard file server for backup purposes. With a tool like Rustic you can revert back to your lates snapshot if something goes wrong.
 
-TODO:
-1. Continuously sync with text files
+### Usage
+The command bellow will create a Notes directory and create text files for all your notes. If you change one of these while the program is running it will be synced back to the StandardNotes server.
+
+```
+./StandardNote -email *Your Email* -password *Your password*
+```
